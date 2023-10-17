@@ -1,0 +1,3 @@
+[submodule "service/collapse"]
+	path = service/collapse
+	url = git@github.com:sdleffler/collapse.git
