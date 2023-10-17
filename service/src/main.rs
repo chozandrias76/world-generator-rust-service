@@ -3,6 +3,8 @@ use noise::utils::{NoiseMapBuilder, PlaneMapBuilder};
 use noise::{Fbm, NoiseFn, Perlin, RidgedMulti};
 use rand::Rng;
 
+extern crate terrain_erosion;
+
 fn main() {
     let (map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset) = (1000, 1000, 0, 200.0, 5, 0.5, 2.0, (0.0, 0.0));
     let noise_map = generate_noise_map(map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset);
@@ -11,6 +13,7 @@ fn main() {
         base_file_name, map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset.0, offset.1
     );
     generate_colored_heightmap(&noise_map, &output_file_name);
+    terrain_erosion::simulate_rainfall()
 }
 
 pub fn interpolate_color(color1: Rgba<u8>, color2: Rgba<u8>, t: f64) -> Rgba<u8> {

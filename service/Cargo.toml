@@ -10,3 +10,4 @@ clap = { version = "4.0", features = ["derive"] }
 noise = { version = "0.8.2", features = ["images"] }
 rand = "0.8.4"
 image = "0.24"
+terrain_erosion = { path = "terrain_erosion" }
