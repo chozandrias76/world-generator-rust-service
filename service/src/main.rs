@@ -62,10 +62,9 @@ fn main() {
         }
     }
     let delta_time = 1.0;
-    let area = 1.0;
-    let length = 1.0;
+    let virtual_pipe_cross_section_area = 1.0;
+    let virtual_pipe_length = 1.0;
     let gravity = 9.81;
-    let k_factor = 0.8;
     terrain_erosion::simulate_rainfall(&noise_map, &mut cell_properties, 0.1, 1.0, 1.0);
     // skip left and top edges
     let (trimmed_map_width, trimmed_map_height) = (map_width - 1, map_height - 1);
@@ -90,39 +89,70 @@ fn main() {
                 left: terrain_erosion::get_flux(
                     &current_cell.water_outflow_flux.left,
                     &delta_time,
-                    &area,
-                    &length,
+                    &virtual_pipe_cross_section_area,
+                    &virtual_pipe_length,
                     &gravity,
                     &terrain_heights.left,
-                    &k_factor,
                 ),
                 right: terrain_erosion::get_flux(
                     &current_cell.water_outflow_flux.right,
                     &delta_time,
-                    &area,
-                    &length,
+                    &virtual_pipe_cross_section_area,
+                    &virtual_pipe_length,
                     &gravity,
                     &terrain_heights.right,
-                    &k_factor,
                 ),
                 top: terrain_erosion::get_flux(
                     &current_cell.water_outflow_flux.top,
                     &delta_time,
-                    &area,
-                    &length,
+                    &virtual_pipe_cross_section_area,
+                    &virtual_pipe_length,
                     &gravity,
                     &terrain_heights.top,
-                    &k_factor,
                 ),
                 bottom: terrain_erosion::get_flux(
                     &current_cell.water_outflow_flux.bottom,
                     &delta_time,
-                    &area,
-                    &length,
+                    &virtual_pipe_cross_section_area,
+                    &virtual_pipe_length,
                     &gravity,
                     &terrain_heights.bottom,
-                    &k_factor,
-                )
+                ),
+            };
+
+            let inflow_fluxes = DirectionalProperties {
+                left: terrain_erosion::get_flux(
+                    &rightward_cell.water_outflow_flux.left,
+                    &delta_time,
+                    &virtual_pipe_cross_section_area,
+                    &virtual_pipe_length,
+                    &gravity,
+                    &(terrain_heights.left * -1.0),
+                ),
+                right: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.right,
+                    &delta_time,
+                    &virtual_pipe_cross_section_area,
+                    &virtual_pipe_length,
+                    &gravity,
+                    &(terrain_heights.right * -1.0),
+                ),
+                top: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.top,
+                    &delta_time,
+                    &virtual_pipe_cross_section_area,
+                    &virtual_pipe_length,
+                    &gravity,
+                    &(terrain_heights.top * -1.0),
+                ),
+                bottom: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.bottom,
+                    &delta_time,
+                    &virtual_pipe_cross_section_area,
+                    &virtual_pipe_length,
+                    &gravity,
+                    &(terrain_heights.bottom * -1.0),
+                ),
             };
 
             // Calculate K factor
@@ -133,51 +163,17 @@ fn main() {
             );
 
             // Apply K factor to all flux components
-            let scaled_outflow_fluxes = terrain_erosion::scale_flux_with_k_factor(
-                &outflow_fluxes,
-                &k_factor
-            );
+            let scaled_outflow_fluxes =
+                terrain_erosion::scale_flux_with_k_factor(&outflow_fluxes, &k_factor);
+            let scaled_inflow_fluxes =
+                terrain_erosion::scale_flux_with_k_factor(&inflow_fluxes, &k_factor);
 
-            let inflow_fluxes = DirectionalProperties {
-                left: terrain_erosion::get_flux(
-                    &rightward_cell.water_outflow_flux.left,
-                    &delta_time,
-                    &area,
-                    &length,
-                    &gravity,
-                    &(terrain_heights.left * -1.0),
-                    &k_factor,
-                ),
-                right: terrain_erosion::get_flux(
-                    &current_cell.water_outflow_flux.right,
-                    &delta_time,
-                    &area,
-                    &length,
-                    &gravity,
-                    &(terrain_heights.right * -1.0),
-                    &k_factor,
-                ),
-                top: terrain_erosion::get_flux(
-                    &current_cell.water_outflow_flux.top,
-                    &delta_time,
-                    &area,
-                    &length,
-                    &gravity,
-                    &(terrain_heights.top * -1.0),
-                    &k_factor,
-                ),
-                bottom: terrain_erosion::get_flux(
-                    &current_cell.water_outflow_flux.bottom,
-                    &delta_time,
-                    &area,
-                    &length,
-                    &gravity,
-                    &(terrain_heights.bottom * -1.0),
-                    &k_factor,
-                )
-            };
-            println!("outflow_fluxes {:?}", &outflow_fluxes);
-            println!("inflow_fluxes {:?}", &inflow_fluxes);
+            let water_height_change = terrain_erosion::get_water_height_change(
+                &delta_time,
+                &scaled_inflow_fluxes,
+                &scaled_outflow_fluxes,
+            );
+            println!("water_height_change {:?}", &water_height_change);
         }
     }
 }

@@ -69,13 +69,12 @@ pub mod terrain_erosion {
         length: &f64,
         gravity: &f64,
         height_difference: &f64,
-        k_factor: &f64,
     ) -> f64 {
         let flux = if current_properties_direction_flux.is_finite() {
             current_properties_direction_flux
-            + delta_time * area * (gravity * height_difference * k_factor / length)
+            + delta_time * area * (gravity * height_difference / length)
         } else {
-            delta_time * area * (gravity * height_difference * k_factor / length)
+            delta_time * area * (gravity * height_difference / length)
         };
         f64::max(0.0, flux)
     }
@@ -118,18 +117,18 @@ pub mod terrain_erosion {
     //  )
     pub fn get_water_height_change(
         delta_time: &f64,
-        scaled_inflow_fluxes: &(f64, f64, f64, f64),
-        scaled_outflow_fluxes: &(f64, f64, f64, f64),
+        scaled_inflow_fluxes: &crate::properties::DirectionalProperties,
+        scaled_outflow_fluxes: &crate::properties::DirectionalProperties,
     ) -> f64 {
         delta_time
-            * (scaled_inflow_fluxes.0
-                + scaled_inflow_fluxes.1
-                + scaled_inflow_fluxes.2
-                + scaled_inflow_fluxes.3
-                - scaled_outflow_fluxes.0
-                - scaled_outflow_fluxes.1
-                - scaled_outflow_fluxes.2
-                - scaled_outflow_fluxes.3
+            * (scaled_inflow_fluxes.left
+                + scaled_inflow_fluxes.right
+                + scaled_inflow_fluxes.top
+                + scaled_inflow_fluxes.bottom
+                - scaled_outflow_fluxes.left
+                - scaled_outflow_fluxes.right
+                - scaled_outflow_fluxes.top
+                - scaled_outflow_fluxes.bottom
             )
     }
 
