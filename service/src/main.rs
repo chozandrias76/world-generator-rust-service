@@ -1,19 +1,216 @@
-use image::{ImageBuffer, Rgba};
+use image::{ImageBuffer, Luma, Rgba};
 use noise::utils::{NoiseMapBuilder, PlaneMapBuilder};
 use noise::{Fbm, NoiseFn, Perlin, RidgedMulti};
 use rand::Rng;
 
 extern crate terrain_erosion;
+use terrain_erosion::properties::{CellProperties, DirectionalProperties};
 
 fn main() {
-    let (map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset) = (1000, 1000, 0, 200.0, 5, 0.5, 2.0, (0.0, 0.0));
-    let mut noise_map = generate_noise_map(map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset);
+    let (map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset) =
+        (3, 3, 0, 200.0, 5, 0.5, 2.0, (0.0, 0.0));
+    let noise_map: Vec<Vec<f64>> = vec![
+        vec![0.0, 0.0, 0.0],
+        vec![0.0, 1.0, 0.0],
+        vec![0.0, 0.0, 0.0],
+    ];
+    // let noise_map = generate_noise_map(
+    //     map_width,
+    //     map_height,
+    //     seed,
+    //     scale,
+    //     octaves,
+    //     persistence,
+    //     lacunarity,
+    //     offset,
+    // );
+
     let base_file_name = "output_heightmap";
-    let output_file_name = format!("{}_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
-        base_file_name, map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset.0, offset.1
+    let output_file_name = format!(
+        "{}_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+        base_file_name,
+        map_width,
+        map_height,
+        seed,
+        scale,
+        octaves,
+        persistence,
+        lacunarity,
+        offset.0,
+        offset.1
+    );
+
+    let img = ImageBuffer::from_fn(map_width as u32, map_height as u32, |x, y| {
+        let pixel_value = (noise_map[y as usize][x as usize] * 255.0) as u8;
+        Luma([pixel_value])
+    });
+
+    // Save the image as a PNG file
+    if let Err(e) = img.save(&output_file_name) {
+        eprintln!("Error: {}", e);
+    } else {
+        println!("Image saved successfully.");
+    }
+
+    let mut cell_properties: Vec<Vec<CellProperties>> = vec![
+            vec![terrain_erosion::properties::CellPropertiesBuilder::new().build(); map_height];
+            map_width
+        ];
+    for x in 0..map_width {
+        for y in 0..map_height {
+            cell_properties[x][y].terrain_height = noise_map[x][y];
+        }
+    }
+    let delta_time = 1.0;
+    let area = 1.0;
+    let length = 1.0;
+    let gravity = 9.81;
+    let k_factor = 0.8;
+    terrain_erosion::simulate_rainfall(&noise_map, &mut cell_properties, 0.1, 1.0, 1.0);
+    // skip left and top edges
+    let (trimmed_map_width, trimmed_map_height) = (map_width - 1, map_height - 1);
+    for x in 1..trimmed_map_width {
+        for y in 1..trimmed_map_height {
+            let current_cell = &cell_properties[x][y];
+            let (leftward_cell, rightward_cell, topward_cell, bottomward_cell) = (
+                &cell_properties[x - 1][y],
+                &cell_properties[x + 1][y],
+                &cell_properties[x][y + 1],
+                &cell_properties[x][y - 1],
+            );
+            let terrain_heights = terrain_erosion::calculate_height_differences(
+                &current_cell,
+                &leftward_cell,
+                &rightward_cell,
+                &topward_cell,
+                &bottomward_cell,
+            );
+
+            let outflow_fluxes = DirectionalProperties {
+                left: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.left,
+                    &delta_time,
+                    &area,
+                    &length,
+                    &gravity,
+                    &terrain_heights.left,
+                    &k_factor,
+                ),
+                right: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.right,
+                    &delta_time,
+                    &area,
+                    &length,
+                    &gravity,
+                    &terrain_heights.right,
+                    &k_factor,
+                ),
+                top: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.top,
+                    &delta_time,
+                    &area,
+                    &length,
+                    &gravity,
+                    &terrain_heights.top,
+                    &k_factor,
+                ),
+                bottom: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.bottom,
+                    &delta_time,
+                    &area,
+                    &length,
+                    &gravity,
+                    &terrain_heights.bottom,
+                    &k_factor,
+                )
+            };
+
+            // Calculate K factor
+            let k_factor = terrain_erosion::calculate_k_factor(
+                &current_cell.water_height,
+                &delta_time,
+                &outflow_fluxes,
+            );
+
+            // Apply K factor to all flux components
+            let scaled_outflow_fluxes = terrain_erosion::scale_flux_with_k_factor(
+                &outflow_fluxes,
+                &k_factor
+            );
+
+            let inflow_fluxes = DirectionalProperties {
+                left: terrain_erosion::get_flux(
+                    &rightward_cell.water_outflow_flux.left,
+                    &delta_time,
+                    &area,
+                    &length,
+                    &gravity,
+                    &(terrain_heights.left * -1.0),
+                    &k_factor,
+                ),
+                right: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.right,
+                    &delta_time,
+                    &area,
+                    &length,
+                    &gravity,
+                    &(terrain_heights.right * -1.0),
+                    &k_factor,
+                ),
+                top: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.top,
+                    &delta_time,
+                    &area,
+                    &length,
+                    &gravity,
+                    &(terrain_heights.top * -1.0),
+                    &k_factor,
+                ),
+                bottom: terrain_erosion::get_flux(
+                    &current_cell.water_outflow_flux.bottom,
+                    &delta_time,
+                    &area,
+                    &length,
+                    &gravity,
+                    &(terrain_heights.bottom * -1.0),
+                    &k_factor,
+                )
+            };
+            println!("outflow_fluxes {:?}", &outflow_fluxes);
+            println!("inflow_fluxes {:?}", &inflow_fluxes);
+        }
+    }
+}
+
+pub fn generate_heightmap() -> Vec<Vec<f64>> {
+    let (map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset) =
+        (32, 32, 0, 200.0, 5, 0.5, 2.0, (0.0, 0.0));
+    let noise_map = generate_noise_map(
+        map_width,
+        map_height,
+        seed,
+        scale,
+        octaves,
+        persistence,
+        lacunarity,
+        offset,
+    );
+    let base_file_name = "output_heightmap";
+    let output_file_name = format!(
+        "{}_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+        base_file_name,
+        map_width,
+        map_height,
+        seed,
+        scale,
+        octaves,
+        persistence,
+        lacunarity,
+        offset.0,
+        offset.1
     );
     generate_colored_heightmap(&noise_map, &output_file_name);
-    terrain_erosion::find_downhill_neighbor(&mut noise_map, 2, 2);
+    return noise_map;
 }
 
 pub fn interpolate_color(color1: Rgba<u8>, color2: Rgba<u8>, t: f64) -> Rgba<u8> {
