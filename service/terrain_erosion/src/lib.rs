@@ -72,7 +72,7 @@ pub mod terrain_erosion {
     ) -> f64 {
         let flux = if current_properties_direction_flux.is_finite() {
             current_properties_direction_flux
-            + delta_time * area * (gravity * height_difference / length)
+                + delta_time * area * (gravity * height_difference / length)
         } else {
             delta_time * area * (gravity * height_difference / length)
         };
@@ -128,8 +128,7 @@ pub mod terrain_erosion {
                 - scaled_outflow_fluxes.left
                 - scaled_outflow_fluxes.right
                 - scaled_outflow_fluxes.top
-                - scaled_outflow_fluxes.bottom
-            )
+                - scaled_outflow_fluxes.bottom)
     }
 
     #[derive(Debug)]
@@ -161,6 +160,120 @@ pub mod terrain_erosion {
             right: right_height_difference,
             top: top_height_difference,
             bottom: bottom_height_difference,
+        }
+    }
+
+    // α(x, y)
+    /// Calculate the local tilt angle in radians.
+    pub fn get_local_tilt_angle(
+        current_cell: &CellProperties,
+        leftward_cell: &CellProperties,
+        rightward_cell: &CellProperties,
+        topward_cell: &CellProperties,
+        bottomward_cell: &CellProperties,
+    ) -> f64 {
+        let delta_h_x = rightward_cell.terrain_height - leftward_cell.terrain_height;
+        let delta_h_y = topward_cell.terrain_height - bottomward_cell.terrain_height;
+
+        let local_tilt_angle_rad = (delta_h_x.powi(2) + delta_h_y.powi(2)).sqrt().atan();
+
+        local_tilt_angle_rad
+    }
+
+    // ∆Wₓ = ½(fᴿ(x-1, y) - fᴸ(x, y) + fᴿ(x, y) - fᴸ(x+1, y))
+    pub fn get_x_hydraulic_erosion_and_deposition(
+        scaled_outflow_fluxes: &crate::properties::DirectionalProperties,
+        scaled_inflow_fluxes: &crate::properties::DirectionalProperties,
+    ) -> f64 {
+        let numerator: f64 = scaled_inflow_fluxes.left - scaled_outflow_fluxes.left
+            + scaled_outflow_fluxes.right
+            - scaled_inflow_fluxes.right;
+        let denominator: f64 = 2.0;
+        numerator / denominator
+    }
+
+    // ∆Wᵧ = ½(fᵀ(x, y-1) - fᴮ(x, y) + fᵀ(x, y) - fᴮ(x, y+1))
+    pub fn get_y_hydraulic_erosion_and_deposition(
+        scaled_outflow_fluxes: &crate::properties::DirectionalProperties,
+        scaled_inflow_fluxes: &crate::properties::DirectionalProperties,
+    ) -> f64 {
+        let numerator: f64 = scaled_inflow_fluxes.top - scaled_outflow_fluxes.top
+            + scaled_outflow_fluxes.bottom
+            - scaled_inflow_fluxes.bottom;
+        let denominator: f64 = 2.0;
+        numerator / denominator
+    }
+
+    // C(x, y) = Kc · sin(α(x, y) · |−→v (x, y)| · lₘₐₓ)
+    /// This function provides a value for sediment transfer.
+    /// It takes into account a maximum sediment transfer at different water heights,
+    /// but does not take into account 3D collision.
+    pub fn get_transport_capacity(
+        global_sediment_capacity: &f64,
+        tilt_radians: &f64,
+        h_erosion_and_deposition: &f64,
+        v_erosion_and_deposition: &f64,
+        optional_lmax: Option<&f64>,
+    ) -> f64 {
+        let lmax = optional_lmax.unwrap_or(&1.0);
+        let water_velocity_magnitude = (h_erosion_and_deposition.powi(2) + v_erosion_and_deposition.powi(2)).sqrt();
+        let sin_of = tilt_radians * water_velocity_magnitude;
+        global_sediment_capacity * f64::sin(sin_of)
+    }
+
+    // lmax(x) =
+    //  0, x ≤ 0
+    //  1, x ≥ Kdmax
+    //  1−(Kdmax −x)/Kdmax, 0 < x < Kdmax
+    /// This function is used to provide a limiting factor to
+    /// sediment transportation at different water heights.
+    pub fn get_lmax(water_height: &f64, maximum_erosion_depth: &f64) -> f64 {
+        if water_height <= &0.0 {
+            0.0
+        } else if water_height >= maximum_erosion_depth {
+            1.0
+        } else {
+            1.0 - (maximum_erosion_depth - water_height) / maximum_erosion_depth
+        }
+    }
+
+    // bt + ∆t = bt − ∆t · Rt(x, y) · Ks(C − st)
+    // s1 = st + ∆t · Rt(x, y) · Ks(C − st)
+    // d3 = d2 + ∆t · Rt(x, y) · Ks(C − st),
+    //
+    // bt + ∆t = bt + ∆t · Kd(st − C)
+    // s1 = st − ∆t · Kd(st − C)
+    // d3 = d2 − ∆t · Kd(st − C),
+    /// This function will produce a tuple for new cell values.
+    /// The original formula factors transportation rate into the 
+    /// dissolve step. This can be addressed in future work, but is
+    /// not required (Rₜ).
+    pub fn get_updated_layers(
+        cell: &CellProperties,
+        capacity: &f64,
+        dissolution_rate: &f64,
+        desposition_rate: &f64,
+        delta_time: &f64,
+    ) -> (f64, f64, f64) {
+        let sediment = &cell.suspended_sediment;
+        let bed_thickness = &cell.terrain_height;
+        let water_height = &cell.water_height;
+        if sediment < capacity {
+            // Dissolve some soil in water
+            let dissolve_volume = delta_time * dissolution_rate * (capacity - sediment);
+            let new_bed_thickness = bed_thickness - dissolve_volume;
+            let new_sediment = sediment + dissolve_volume;
+            let new_water_height = water_height + dissolve_volume;
+    
+            (new_sediment, new_bed_thickness, new_water_height)
+        } else {
+            // Dispose some of the transported sediment
+            let dispose_volume = delta_time * desposition_rate * (sediment - capacity);
+            let new_bed_thickness = bed_thickness + dispose_volume;
+            let new_sediment = sediment - dispose_volume;
+            let new_water_height = water_height - dispose_volume;
+    
+            (new_sediment, new_bed_thickness, new_water_height)
         }
     }
 }

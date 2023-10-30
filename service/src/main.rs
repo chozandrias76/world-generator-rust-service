@@ -1,17 +1,40 @@
+/*  Citations:
+    https://huw-man.github.io/Interactive-Erosion-Simulator-on-GPU/
+    https://github.com/Huw-man/Interactive-Erosion-Simulator-on-GPU/blob/master/src/main.cpp
+    https://inria.hal.science/inria-00402079/document
+    https://old.cescg.org/CESCG-2011/papers/TUBudapest-Jako-Balazs.pdf
+*/
 use image::{ImageBuffer, Luma, Rgba};
 use noise::utils::{NoiseMapBuilder, PlaneMapBuilder};
 use noise::{Fbm, NoiseFn, Perlin, RidgedMulti};
 use rand::Rng;
 
 extern crate terrain_erosion;
-use terrain_erosion::properties::{CellProperties, DirectionalProperties};
+use terrain_erosion::properties::{CellProperties, CellPropertiesBuilder, DirectionalProperties};
 
 fn main() {
+    let delta_time = 0.0005;
+    let virtual_pipe_cross_section_area = 0.6;
+    let virtual_pipe_length = 1.0;
+    let gravity = 9.81;
+    let rain_rate = 2.0;
+    let rain_kr = 0.03;
+    let global_sediment_capacity = 0.1;
+    let global_sediment_dissolusion = 0.1;
+    let global_sediment_deposition = 0.1;
+    let maximum_erosion_depth = 2.0;
+    let evaporation_rate = 0.003;
+
     let (map_width, map_height, seed, scale, octaves, persistence, lacunarity, offset) =
         (3, 3, 0, 200.0, 5, 0.5, 2.0, (0.0, 0.0));
+    // let noise_map: Vec<Vec<f64>> = vec![
+    //     vec![1.0, 1.0, 1.0],
+    //     vec![1.0, 0.0, 1.0],
+    //     vec![1.0, 1.0, 1.0],
+    // ];
     let noise_map: Vec<Vec<f64>> = vec![
         vec![0.0, 0.0, 0.0],
-        vec![0.0, 1.0, 0.0],
+        vec![0.0, 255.0, 0.0],
         vec![0.0, 0.0, 0.0],
     ];
     // let noise_map = generate_noise_map(
@@ -61,11 +84,14 @@ fn main() {
             cell_properties[x][y].terrain_height = noise_map[x][y];
         }
     }
-    let delta_time = 1.0;
-    let virtual_pipe_cross_section_area = 1.0;
-    let virtual_pipe_length = 1.0;
-    let gravity = 9.81;
-    terrain_erosion::simulate_rainfall(&noise_map, &mut cell_properties, 0.1, 1.0, 1.0);
+
+    terrain_erosion::simulate_rainfall(
+        &noise_map,
+        &mut cell_properties,
+        rain_rate,
+        delta_time,
+        rain_kr,
+    );
     // skip left and top edges
     let (trimmed_map_width, trimmed_map_height) = (map_width - 1, map_height - 1);
     for x in 1..trimmed_map_width {
@@ -155,14 +181,12 @@ fn main() {
                 ),
             };
 
-            // Calculate K factor
             let k_factor = terrain_erosion::calculate_k_factor(
                 &current_cell.water_height,
                 &delta_time,
                 &outflow_fluxes,
             );
 
-            // Apply K factor to all flux components
             let scaled_outflow_fluxes =
                 terrain_erosion::scale_flux_with_k_factor(&outflow_fluxes, &k_factor);
             let scaled_inflow_fluxes =
@@ -173,7 +197,45 @@ fn main() {
                 &scaled_inflow_fluxes,
                 &scaled_outflow_fluxes,
             );
-            println!("water_height_change {:?}", &water_height_change);
+            let timestep_current_cell = CellPropertiesBuilder::new().water_height(f64::min(
+                0.0,
+                current_cell.water_height + water_height_change,
+            ));
+            let (x_hydraulic_erosion_and_deposition, y_hydraulic_erosion_and_deposition) = (
+                terrain_erosion::get_x_hydraulic_erosion_and_deposition(
+                    &scaled_outflow_fluxes,
+                    &scaled_inflow_fluxes,
+                ),
+                terrain_erosion::get_y_hydraulic_erosion_and_deposition(
+                    &scaled_outflow_fluxes,
+                    &scaled_inflow_fluxes,
+                ),
+            );
+            let local_tilt = terrain_erosion::get_local_tilt_angle(
+                &current_cell,
+                &leftward_cell,
+                &rightward_cell,
+                &topward_cell,
+                &bottomward_cell,
+            );
+            let lmax =
+                terrain_erosion::get_lmax(&current_cell.water_height, &maximum_erosion_depth);
+            let transport_capacity = terrain_erosion::get_transport_capacity(
+                &global_sediment_capacity,
+                &local_tilt,
+                &x_hydraulic_erosion_and_deposition,
+                &y_hydraulic_erosion_and_deposition,
+                Some(&lmax),
+            );
+            let updated_layers = terrain_erosion::get_updated_layers(
+                &timestep_current_cell,
+                &transport_capacity,
+                &global_sediment_dissolusion,
+                &global_sediment_deposition,
+                &delta_time,
+            );
+            println!("transport_capacity {}", &transport_capacity);
+            // TODO: move dissolved sediment along the water
         }
     }
 }
